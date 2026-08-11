@@ -1,0 +1,71 @@
+{
+  "clientname": {
+    "_auth": "Choose ONE: clay_cookie (recommended) OR clay_email + clay_password",
+    "clay_cookie": "claysession=s%3Ayour-cookie-value-from-browser-devtools",
+    "_auth_note": "Get clay_cookie: app.clay.com → DevTools → Application → Cookies → claysession → copy Value",
+
+    "clay_workspace_id": 0,
+
+    "_sfdc_note": "Salesforce credentials — one set per profile so multiple clients work independently",
+    "sf_username": "your.sfdc.email@example.com",
+    "sf_password": "yourSFDCpassword",
+    "sf_security_token": "yourSFDCsecuritytoken",
+
+    "_storage_note": "Optional: Supabase Storage for persistent signed URLs. Bucket is PRIVATE — files are accessed via time-limited signed URLs.",
+    "_storage_setup": "1) Supabase dashboard → Storage → New bucket (leave Public off). 2) Settings → API → copy Project URL + service_role key",
+    "supabase_url": "https://your-project-id.supabase.co",
+    "supabase_service_key": "your-service-role-key",
+    "supabase_bucket": "clay-exports",
+    "supabase_signed_url_ttl": 604800,
+
+    "_step1": "Run clay_list_workspaces to get clay_workspace_id, then clay_list_tables to find table IDs",
+    "_step2": "Run clay_get_table_schema('t_yourTableId') to get all field IDs below",
+
+    "account_table_id": "t_xxxxxxxx",
+    "account_view_id": "gv_xxxxxxxx",
+
+    "account_input_columns": {
+      "_note": "URL or Domain field ID — what the Enrich Company action reads as input",
+      "domain": "f_xxxxxxxx"
+    },
+
+    "account_enrichment_column_ids": ["f_xxxxxxxx"],
+
+    "account_enrichment_subfield_map": {
+      "_note": "Keys are sub-fields in externalContent.fullValue of the Enrich Company cell. Run clay_document_table to discover keys.",
+      "industry": "Industry",
+      "employee_count": "NumberOfEmployees",
+      "url": "Account_Linkedin_URL__c",
+      "website": "Website",
+      "description": "Description"
+    },
+
+    "account_field_map": {
+      "_note": "SFDC Account fields used as enrichment input (read during SFDC query)",
+      "domain": "Domain2__c",
+      "linkedin": "Account_Linkedin_URL__c"
+    },
+
+    "contact_table_id": "t_xxxxxxxx",
+    "contact_view_id": "gv_xxxxxxxx",
+
+    "contact_input_columns": {
+      "_note": "Email field ID — what the Enrich Person action reads as input",
+      "email": "f_xxxxxxxx"
+    },
+
+    "contact_enrichment_column_ids": ["f_xxxxxxxx"],
+
+    "contact_enrichment_subfield_map": {
+      "_note": "Run clay_document_table on the contact table after a test enrichment to discover keys",
+      "title": "Title",
+      "url": "Contact_Linkedin_URL2__c"
+    },
+
+    "contact_field_map": {
+      "_note": "SFDC Contact fields used as enrichment input",
+      "email": "Email",
+      "linkedin": "Contact_Linkedin_URL2__c"
+    }
+  }
+}
