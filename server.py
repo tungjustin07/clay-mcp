@@ -138,6 +138,35 @@ def clay_get_rows(
 
 
 @mcp.tool()
+def clay_search_tables(
+    query: str,
+    field_name: str = "",
+    table_ids: list[str] | None = None,
+    workspace_id: str = "0",
+    max_rows_per_table: int = 500,
+    max_results: int = 50,
+    profile: str = "myorg",
+) -> str:
+    """
+    Search for a value across all tables in a Clay workspace.
+
+    Scans every row in every table (in parallel) and returns matches where any
+    field contains the query string. Useful for finding which table a record
+    lives in, or checking if a domain/email exists anywhere in Clay.
+
+    Args:
+        query: Value to search for (case-insensitive substring match)
+        field_name: Only search columns with this name (default: all columns)
+        table_ids: Limit search to these table IDs (default: all tables in workspace)
+        workspace_id: Workspace to search (uses profiles.json value if omitted)
+        max_rows_per_table: Max rows to scan per table (default: 500)
+        max_results: Stop after finding this many matches (default: 50)
+        profile: Profile name (default: "myorg")
+    """
+    return _impl().clay_search_tables(query, field_name, table_ids, workspace_id, max_rows_per_table, max_results, profile)
+
+
+@mcp.tool()
 def clay_export_table_data(
     table_id: str,
     view_id: str = "",

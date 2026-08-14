@@ -14,6 +14,8 @@ import re
 import sys
 import time
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -530,6 +532,141 @@ def clay_get_rows(
         results.append(record)
 
     return json.dumps(results, indent=2)
+
+
+def clay_search_tables(
+    query: str,
+    field_name: str = "",
+    table_ids: list[str] | None = None,
+    workspace_id: str = "0",
+    max_rows_per_table: int = 500,
+    max_results: int = 50,
+    profile: str = "myorg",
+) -> str:
+    """
+    Search for a value across all tables (or specific tables) in a Clay workspace.
+
+    Scans cell values in each table and returns every row where any field contains
+    the query string (case-insensitive substring match). Searches run in parallel
+    across tables for speed.
+
+    Args:
+        query: Value to search for (case-insensitive substring)
+        field_name: Only search columns with this name (default: all columns)
+        table_ids: Limit search to these table IDs (default: all tables in workspace)
+        workspace_id: Workspace to search (uses profiles.json value if omitted)
+        max_rows_per_table: Max rows to scan per table (default: 500)
+        max_results: Stop after finding this many total matches (default: 50)
+        profile: Profile name (default: "myorg")
+    """
+    prof = _get_profile(profile)
+    clay = _get_clay(profile)
+
+    # --- 1. Discover tables ---
+    if table_ids:
+        tables = [{"id": tid, "name": tid} for tid in table_ids]
+    else:
+        ws_id = int(workspace_id) if workspace_id and workspace_id != "0" else prof.get("clay_workspace_id")
+        if not ws_id:
+            return "workspace_id required (or set clay_workspace_id in profiles.json)"
+
+        # Two-level discovery: workspace → workbooks → tables
+        tables = []
+        top = clay.list_resources(int(ws_id))
+        workbooks = top.get("resources") or (top if isinstance(top, list) else [])
+        for wb in workbooks:
+            wb_id = wb.get("id", "")
+            wb_type = (wb.get("resourceType") or wb.get("type", "")).upper()
+            if wb_type == "TABLE":
+                tables.append({"id": wb_id, "name": wb.get("name", wb_id)})
+            elif wb_type in ("WORKBOOK", "FOLDER", ""):
+                inner = clay.list_resources(int(ws_id), parent_id=wb_id)
+                children = inner.get("resources") or (inner if isinstance(inner, list) else [])
+                for r in children:
+                    if (r.get("resourceType") or r.get("type", "")).upper() == "TABLE":
+                        tables.append({"id": r.get("id", ""), "name": r.get("name", r.get("id", ""))})
+
+    if not tables:
+        return "No tables found to search."
+
+    query_lower = query.lower()
+    field_name_lower = field_name.lower() if field_name else ""
+
+    # Thread-safe results collection
+    matches: list[dict] = []
+    matches_lock = threading.Lock()
+    done = threading.Event()
+
+    def search_table(tbl: dict) -> None:
+        if done.is_set():
+            return
+        tid = tbl["id"]
+        tname = tbl["name"]
+        try:
+            schema = clay.extract_schema(tid)
+            view_id = schema.get("first_view_id", "")
+            field_id_to_name = {f["id"]: f["name"] for f in schema["fields"]}
+
+            if not view_id:
+                return
+
+            rows = clay.get_all_rows(tid, view_id, max_rows=max_rows_per_table)
+            for row in rows:
+                if done.is_set():
+                    return
+                cells = row.get("cells") or row.get("fields") or {}
+                record_id = row.get("id", "")
+                matched_fields = []
+                for fid, cell_data in cells.items():
+                    col_name = field_id_to_name.get(fid, fid)
+                    if field_name_lower and col_name.lower() != field_name_lower:
+                        continue
+                    val = clay.extract_cell_value(cell_data)
+                    if val is not None and query_lower in str(val).lower():
+                        matched_fields.append({"field": col_name, "value": str(val)})
+                if matched_fields:
+                    with matches_lock:
+                        if len(matches) < max_results:
+                            matches.append({
+                                "table_name": tname,
+                                "table_id": tid,
+                                "record_id": record_id,
+                                "matched_fields": matched_fields,
+                            })
+                        if len(matches) >= max_results:
+                            done.set()
+                            return
+        except Exception:
+            pass  # skip tables that fail (no view, permissions, etc.)
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [ex.submit(search_table, t) for t in tables]
+        for f in as_completed(futures):
+            f.result()  # propagate unexpected exceptions
+
+    if not matches:
+        scope = f"field '{field_name}' in " if field_name else ""
+        return f"No matches found for \"{query}\" in {scope}{len(tables)} table(s)."
+
+    # --- Format output ---
+    # Group by table
+    by_table: dict[str, list[dict]] = {}
+    for m in matches:
+        key = f"{m['table_name']} ({m['table_id']})"
+        by_table.setdefault(key, []).append(m)
+
+    rows_scanned_note = f"(searched up to {max_rows_per_table} rows/table across {len(tables)} table(s))"
+    truncated = " — result limit reached, there may be more" if done.is_set() else ""
+    lines = [f"Found {len(matches)} match(es) for \"{query}\" {rows_scanned_note}{truncated}\n"]
+
+    for table_label, table_matches in by_table.items():
+        lines.append(f"**{table_label}** — {len(table_matches)} match(es)")
+        for m in table_matches:
+            fields_str = "  |  ".join(f"{mf['field']}: {mf['value'][:80]}" for mf in m["matched_fields"])
+            lines.append(f"  • {m['record_id']}  {fields_str}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def clay_export_table_data(
